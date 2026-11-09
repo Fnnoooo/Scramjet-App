@@ -125,7 +125,8 @@ const gameCatalog={
  'baldi':{name:"Baldi's Basics Party",url:'https://wasm.rip/files/birthdaybash/index.html'},
  'fnaf':{name:'Five Nights at Freddy’s',url:'https://www.miniplay.com/game/five-nights-at-freddys'},
  'granny':{name:'Granny Original',url:'https://playhop.com/app/granny-original-259805'},
- 'geo':{name:'Fake Geo Dash',url:'https://www.miniplay.com/game/geometry-dash'}
+ 'geo':{name:'Fake Geo Dash',url:'https://www.miniplay.com/game/geometry-dash'},
+ 'chess':{name:'Chess.com',url:'https://www.chess.com/play/online'}
 };
 // Game sessions are isolated by a clean host-page reload on exit/restart.
 // Scramjet's old frame/worker registrations and game WebSockets otherwise
@@ -232,44 +233,37 @@ el('games-back').addEventListener('click',()=>{if(selectedGame)freshGameSession(
 document.querySelectorAll('[data-game]').forEach(b=>b.addEventListener('click',()=>openGame(b.dataset.game)));
 el('game-back').addEventListener('click',()=>freshGameSession({view:'games'}));
 el('game-restart').addEventListener('click',()=>selectedGame&&freshGameSession({view:'game',id:selectedGame}));
-// A single in-page Learning panel: no separate browser window or focus races.
-// Load the existing Learning document on demand and keep it mounted when hidden.
-let learningPanel=null;
-function showLearningPanel(){
- if(!learningPanel){
-  const panel=document.createElement('section');
-  panel.id='nexus-learning-panel';
-  panel.setAttribute('aria-label','Learning assistant');
-  panel.style.cssText='position:fixed;right:16px;top:16px;width:min(420px,calc(100vw - 24px));height:min(680px,calc(100dvh - 24px));z-index:2147483647;background:#111827;border:1px solid #475569;border-radius:15px;box-shadow:0 20px 75px #000a;overflow:hidden;display:flex;flex-direction:column;';
-  const bar=document.createElement('div');
-  bar.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;background:#172033;color:white;font:600 13px system-ui;cursor:move;touch-action:none;user-select:none;';
-  const label=document.createElement('span');label.textContent='Learning';
-  const controls=document.createElement('div');controls.style.cssText='display:flex;gap:8px;';
-  const minimize=document.createElement('button');minimize.textContent='−';minimize.title='Hide Learning';
-  const close=document.createElement('button');close.textContent='×';close.title='Close Learning';
-  for(const b of [minimize,close])b.style.cssText='background:#334155;color:white;border:0;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:18px;';
-  minimize.onclick=()=>{panel.style.display='none';};
-  close.onclick=()=>{panel.remove();learningPanel=null;};
-  controls.append(minimize,close);bar.append(label,controls);
-  const frame=document.createElement('iframe');frame.src='/learning.html';frame.title='Learning assistant';
-  frame.allow='display-capture; clipboard-read; clipboard-write';
-  frame.style.cssText='width:100%;height:100%;flex:1;border:0;background:#0b1220;';
-  panel.append(bar,frame);document.body.append(panel);learningPanel=panel;
-  let drag=null;
-  bar.addEventListener('pointerdown',e=>{
-   if(e.target.closest('button'))return;
-   const r=panel.getBoundingClientRect();drag={x:e.clientX-r.left,y:e.clientY-r.top};
-   bar.setPointerCapture(e.pointerId);
-  });
-  bar.addEventListener('pointermove',e=>{
-   if(!drag)return;
-   panel.style.left=Math.max(0,Math.min(innerWidth-panel.offsetWidth,e.clientX-drag.x))+'px';
-   panel.style.top=Math.max(0,Math.min(innerHeight-panel.offsetHeight,e.clientY-drag.y))+'px';
-   panel.style.right='auto';
-  });
-  bar.addEventListener('pointerup',()=>drag=null);
-  bar.addEventListener('pointercancel',()=>drag=null);
+// Document PiP is opened directly from the main NEXUS tab. No popup host.
+// The calculator and assistant live in ONE PiP iframe, so the user can switch
+// to a captured tab while the floating assistant remains visible.
+let learningWindow=null;
+async function showLearningPanel(){
+ if(learningWindow && !learningWindow.closed){
+  try{learningWindow.focus();}catch(_){}
+  return;
  }
- learningPanel.style.display='flex';
+ if(!window.documentPictureInPicture?.requestWindow){
+  // Browser lacks Document PiP: show a single in-page fallback, no extra popup.
+  let panel=document.getElementById('nexus-learning-fallback');
+  if(!panel){
+   panel=document.createElement('section');panel.id='nexus-learning-fallback';
+   panel.style.cssText='position:fixed;right:12px;top:12px;width:min(440px,calc(100vw - 24px));height:min(690px,calc(100dvh - 24px));z-index:2147483647;background:#111827;border:1px solid #64748b;border-radius:18px;overflow:hidden;box-shadow:0 20px 70px #000b;';
+   const close=document.createElement('button');close.textContent='×';close.title='Close Learning';close.style.cssText='position:absolute;right:8px;top:8px;z-index:3;border:0;border-radius:8px;background:#374151;color:white;font-size:22px;cursor:pointer';close.onclick=()=>panel.remove();
+   const frame=document.createElement('iframe');frame.src='/learning.html';frame.allow='display-capture; clipboard-read; clipboard-write';frame.style.cssText='width:100%;height:100%;border:0';panel.append(frame,close);document.body.append(panel);
+  }else panel.style.display='block';
+  return;
+ }
+ try{
+  const win=await documentPictureInPicture.requestWindow({width:460,height:710});
+  learningWindow=win;
+  win.document.title='Calculator';
+  win.document.body.style.cssText='margin:0;background:#0b1020;height:100vh;overflow:hidden';
+  const frame=win.document.createElement('iframe');
+  frame.src='/learning.html';frame.title='Calculator';
+  frame.allow='display-capture; clipboard-read; clipboard-write';
+  frame.style.cssText='width:100%;height:100%;border:0;display:block';
+  win.document.body.append(frame);
+  win.addEventListener('pagehide',()=>{if(learningWindow===win)learningWindow=null;},{once:true});
+ }catch(err){console.warn('Learning PiP unavailable:',err);}
 }
 el('ai-launch').addEventListener('click',showLearningPanel);
