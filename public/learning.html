@@ -1,18 +1,36 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Learning Assistant</title></head><body><script>(()=>{
 'use strict';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-let pip=null,stream=null,video=null,active=false;
+let pip=null,stream=null,video=null,active=false,uiPip=null;
 const css=`*{box-sizing:border-box}body{margin:0;background:#090a10;color:#f3efff;font:13px system-ui;overflow:hidden}header{display:flex;align-items:center;justify-content:space-between;background:#151322;padding:12px 14px;border-bottom:1px solid #30294d}header b{font:italic 700 19px Georgia,serif;letter-spacing:.4px}header small{color:#b8a8e8}button{border:1px solid #514379;border-radius:10px;background:#29213e;color:#fff;padding:9px 11px;cursor:pointer}button:hover{background:#46326e}button:disabled{opacity:.5}main{display:flex;flex-direction:column;height:calc(100vh - 52px);padding:12px;gap:10px}.status{color:#bbb0d5;font-size:11px}.messages{flex:1;overflow:auto;display:flex;flex-direction:column;gap:10px}.msg{padding:10px 12px;border:1px solid #352b50;border-radius:12px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;background:#171424}.msg.user{background:#292040;border-color:#7058b6}.controls{display:flex;gap:7px;flex-wrap:wrap}.controls button{flex:1}form{display:flex;gap:7px}input{flex:1;min-width:0;background:#14111e;border:1px solid #5d4b87;border-radius:11px;color:white;padding:11px}form button{background:#8161d3} .orb{display:inline-block;width:8px;height:8px;border-radius:50%;background:#a98bff;box-shadow:0 0 12px #ac82ff;animation:pulse 2s infinite}@keyframes pulse{50%{opacity:.35;transform:scale(.75)}}`;
 async function open(){
  // Standalone mode is a top-level window; no Document PiP required.
  try{
   pip=window;
-  const d=pip.document;d.head.innerHTML='<meta name="viewport" content="width=device-width,initial-scale=1"><title>Learning</title>';
+  let d=pip.document;d.head.innerHTML='<meta name="viewport" content="width=device-width,initial-scale=1"><title>Learning</title>';
   const st=d.createElement('style');st.textContent=css;d.head.append(st);
   d.body.innerHTML=`<header><div><b>Learning</b> <small>• floating assistant</small></div><span class="orb"></span></header><main><div class="status" id="status">Share a tab to ask questions about it. Screen sharing is optional.</div><div class="controls"><button id="share">Share tab</button><button id="solve" disabled>Solve this page</button><button id="stop" disabled>Stop sharing</button></div><div class="messages" id="messages"><div class="msg">Hi! I can help explain text from a tab you choose to share. Screenshots are captured only when you ask a question.</div></div><form id="ask"><input id="prompt" placeholder="Ask about the shared tab…" autocomplete="off"><button id="send">Ask</button></form></main>`;
   const $=id=>d.getElementById(id),status=t=>$('status').textContent=t,add=(t,who='ai')=>{let el=d.createElement('div');el.className='msg '+who;el.textContent=t;$('messages').append(el);$('messages').scrollTop=$('messages').scrollHeight;return el;};
   const stop=()=>{stream?.getTracks().forEach(t=>t.stop());stream=null;video=null;active=false;$('share').disabled=false;$('solve').disabled=true;$('stop').disabled=true;status('Not sharing. You can share again at any time.');};
-  $('share').onclick=async()=>{try{stream=await navigator.mediaDevices.getDisplayMedia({video:{displaySurface:'browser'},audio:false,preferCurrentTab:false});video=document.createElement('video');video.srcObject=stream;video.muted=true;await video.play();active=true;$('share').disabled=true;$('solve').disabled=false;$('stop').disabled=false;status('Sharing active. Ask a question to capture the current frame.');stream.getVideoTracks()[0].addEventListener('ended',stop,{once:true});}catch(e){status('Sharing was cancelled or blocked: '+e.message);}};
+  async function floatAssistant(){
+   if(uiPip&&!uiPip.closed)return true;
+   if(window.top!==window.self||!('documentPictureInPicture' in window))return false;
+   try{
+    const floating=await window.documentPictureInPicture.requestWindow({width:440,height:660});
+    const fd=floating.document;
+    fd.head.innerHTML='<meta name="viewport" content="width=device-width,initial-scale=1"><title>Learning</title>';
+    const style=fd.createElement('style');style.textContent=css;fd.head.append(style);
+    const header=d.querySelector('header'),main=d.querySelector('main');
+    fd.body.append(header,main);
+    d=fd;uiPip=floating;
+    floating.addEventListener('pagehide',()=>{stop();uiPip=null;window.close();},{once:true});
+    status('Floating Learning is ready. Click Share tab again here, then switch to the tab you want to solve.');
+    return true;
+   }catch(err){status('Floating mode is unavailable ('+err.message+'). You can still share from this window, but it may go behind other tabs.');return false;}
+  }
+  $('share').onclick=async()=>{
+   if(!uiPip&&'documentPictureInPicture' in window){const floated=await floatAssistant();if(floated)return;}
+   try{stream=await navigator.mediaDevices.getDisplayMedia({video:{displaySurface:'browser'},audio:false,preferCurrentTab:false});video=document.createElement('video');video.srcObject=stream;video.muted=true;await video.play();active=true;$('share').disabled=true;$('solve').disabled=false;$('stop').disabled=false;status('Sharing active. Ask a question to capture the current frame.');stream.getVideoTracks()[0].addEventListener('ended',stop,{once:true});}catch(e){status('Sharing was cancelled or blocked: '+e.message);}};
   $('stop').onclick=stop;
   pip.addEventListener('pagehide',stop,{once:true});
   $('solve').onclick=()=>{if(!active)return;$('prompt').value='Solve the problem(s) visible on the shared page. Show the steps and explain the answers. If the text is unclear, say what is missing.';$('ask').requestSubmit();};
