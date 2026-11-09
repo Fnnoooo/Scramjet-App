@@ -1,1 +1,3 @@
 NEXUS V10 Learning UI cleanup and error reporting. The original popup shows only a status while Document Picture-in-Picture is active; Chrome browser controls cannot be removed. AI still depends on the third-party prexzyapis endpoint; failures are now clearly identified rather than claimed fixed.
+
+V11 Learning: uses the confirmed-working aiapk endpoint rather than askgpt5. The separate learning.html window opens as a calculator; enter 0003 and press = to show the Learning UI. This is a visual disguise only, not a browser-history privacy guarantee. Chrome's PiP controls and sharing indicators remain browser-controlled. AI and OCR depend on external services and permissions.

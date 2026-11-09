@@ -128,11 +128,22 @@ const gameCatalog={
  'geo':{name:'Fake Geo Dash',url:'https://www.miniplay.com/game/geometry-dash'}
 };
 let selectedGame=null,gameLoadToken=0,activeGameFrame=null;
+let reusableGameProxy=null;
 function destroyGame(){
  gameLoadToken++;
- if(activeGameFrame){try{activeGameFrame.frame.src='about:blank';activeGameFrame.frame.remove();}catch(_){}activeGameFrame=null;}
- gameHost.querySelectorAll('iframe').forEach(f=>{try{f.src='about:blank';}catch(_){}f.remove();});
- gameHost.replaceChildren();
+ // Keep the Scramjet frame registered and reuse it. Removing the DOM node alone
+ // does not unregister its routing prefix from the controller/service worker.
+ if(reusableGameProxy){
+  try{reusableGameProxy.frame.src='about:blank';}catch(e){console.warn('[NEXUS game cleanup]',e);}
+  reusableGameProxy.frame.hidden=true;
+  reusableGameProxy.frame.style.display='none';
+ }
+ activeGameFrame=null;
+ gameHost.querySelectorAll('iframe').forEach(f=>{
+  if(reusableGameProxy&&f===reusableGameProxy.frame)return;
+  try{f.src='about:blank';}catch(_){}f.remove();
+ });
+ gameHost.querySelectorAll('.game-connect-status').forEach(n=>n.remove());
 }
 function leaveGames(){destroyGame();gamesView.hidden=true;gamesLibrary.hidden=false;gamePlayer.hidden=true;document.body.classList.remove('games-active');}
 function showGames(){stopFrame();state.url='';state.history=[];state.index=-1;el('browser-view').hidden=true;el('homepage').hidden=true;document.body.classList.remove('browser-active');document.body.classList.add('games-active');gamesView.hidden=false;gamesLibrary.hidden=false;gamePlayer.hidden=true;el('address').value='';}
@@ -151,18 +162,29 @@ async function openGame(id){
    const f=document.createElement('iframe');f.title=game.name;f.loading='eager';f.setAttribute('allow','fullscreen; autoplay; gamepad');f.allowFullscreen=true;
    f.src=game.url;gameHost.append(f);message.remove();hint.textContent='Local game loaded.';return;
   }
-  // Third-party games must use the same Scramjet proxy as other browser shortcuts.
   await ensureProxy();if(token!==gameLoadToken)return;
-  const proxyFrame=state.controller.createFrame();activeGameFrame=proxyFrame;
-  const f=proxyFrame.frame;f.title=game.name;f.id='nexus-game-proxy';f.setAttribute('allow','fullscreen; autoplay; gamepad');f.allowFullscreen=true;
+  // Exactly one proxy game frame per page lifetime. No accumulating routing
+  // prefixes or abandoned WebSocket/worker registrations on repeat visits.
+  if(!reusableGameProxy){
+   reusableGameProxy=state.controller.createFrame();
+   const iframe=reusableGameProxy.frame;
+   iframe.id='nexus-game-proxy';
+   iframe.setAttribute('allow','fullscreen; autoplay; gamepad');iframe.allowFullscreen=true;
+  }
+  const proxyFrame=reusableGameProxy;
+  activeGameFrame=proxyFrame;
+  const f=proxyFrame.frame;
+  f.title=game.name;f.hidden=false;f.style.display='';
   gameHost.append(f);message.textContent='Connecting through NEXUS proxy…';
-  await proxyFrame.go(game.url);if(token!==gameLoadToken)return;
-  message.remove();hint.textContent='Loaded through NEXUS proxy. If the game stays blank, try Open game directly or Find another version.';
+  await proxyFrame.go(game.url);
+  if(token!==gameLoadToken)return;
+  message.remove();hint.textContent='Game connected. If a game stalls, use Restart or Open game directly.';
  }catch(e){
   if(token!==gameLoadToken)return;
   console.error('[NEXUS game]',game.name,e);
-  if(activeGameFrame){try{activeGameFrame.frame.remove();}catch(_){}activeGameFrame=null;}
-  message.textContent='This game could not connect through the proxy. Try Open game directly or Find another version below.';
+  if(reusableGameProxy){try{reusableGameProxy.frame.src='about:blank';reusableGameProxy.frame.hidden=true;reusableGameProxy.frame.style.display='none';}catch(_){} }
+  activeGameFrame=null;
+  message.textContent='This game could not connect through the proxy. Try Restart, Open game directly, or Find another version below.';
   hint.textContent='Some games block proxies, require cookies or WebGL, or refuse embedded connections.';
  }
 }
