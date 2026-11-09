@@ -37,7 +37,7 @@ function stopFrame(){
   if(state.frame){try{state.frame.frame.src='about:blank';state.frame.frame.remove();}catch(e){console.warn(e);}state.frame=null;}
   el('browser-frame-host').replaceChildren();
 }
-function home(){stopFrame();state.url='';state.history=[];state.index=-1;document.body.classList.remove('browser-active');el('browser-view').hidden=true;el('homepage').hidden=false;el('address').value='';status('');}
+function home(){leaveGames();stopFrame();state.url='';state.history=[];state.index=-1;document.body.classList.remove('browser-active');el('browser-view').hidden=true;el('homepage').hidden=false;el('address').value='';status('');}
 function showBrowser(){el('browser-view').hidden=false;el('homepage').hidden=true;document.body.classList.add('browser-active');}
 async function ensureProxy(){
  if(state.ready)return;
@@ -55,7 +55,7 @@ async function ensureProxy(){
 function normalize(input){input=(input||'').trim();if(!input)return '';if(/^https?:\/\//i.test(input))return input;if(/^[\w-]+(\.[\w-]+)+([/:?#]|$)/.test(input))return 'https://'+input;return 'https://www.google.com/search?q='+encodeURIComponent(input);}
 async function navigate(input,record=true){
  const url=normalize(input);if(!url||state.loading)return;
- state.loading=true;showBrowser();status('Loading…');el('address').value=url;
+ leaveGames();state.loading=true;showBrowser();status('Loading…');el('address').value=url;
  try{
   await ensureProxy();
   // A new frame also guarantees the previous site's media stops.
@@ -81,26 +81,67 @@ window.nexusMotionEnabled=localStorage.getItem('nexus-motion')!=='off';el('motio
 el('settings').addEventListener('click',()=>{el('modal').classList.add('show');el('theme').value=localStorage.getItem('nexus-theme')||'default';el('motion').checked=window.nexusMotionEnabled;});
 el('close').addEventListener('click',()=>el('modal').classList.remove('show'));
 el('modal').addEventListener('click',e=>{if(e.target===el('modal'))el('modal').classList.remove('show');});
+// Save cloak preference until explicitly disabled. A browser may block automatic
+// popups on page load, so offer a click-to-open button as a reliable fallback.
+const CLOAK_KEY='nexus-auto-cloak';
+function launchCloak(){
+  if(window.top!==window.self)return false; // Never recurse inside the cloak iframe.
+  const tab=window.open('about:blank','_blank');
+  if(!tab)return false;
+  try{
+    tab.document.title='Super Math Learning!';
+    const iframe=tab.document.createElement('iframe');
+    iframe.src=location.href;
+    iframe.title='Browser';
+    Object.assign(iframe.style,{position:'fixed',inset:'0',width:'100%',height:'100%',border:'0'});
+    tab.document.body.style.margin='0';tab.document.body.appendChild(iframe);
+    location.assign('https://clever.com/');
+    return true;
+  }catch(err){try{tab.close()}catch(_){}return false;}
+}
+function offerCloakLaunch(){
+  if(document.getElementById('nexus-cloak-launch'))return;
+  const b=document.createElement('button');b.id='nexus-cloak-launch';
+  b.textContent='Open saved about:blank mode';
+  b.setAttribute('aria-label','Open saved about blank mode');
+  Object.assign(b.style,{position:'fixed',bottom:'18px',right:'18px',zIndex:'999999',padding:'12px 16px',background:'#29213e',color:'#fff',border:'1px solid #7a6dd1',borderRadius:'12px',cursor:'pointer'});
+  b.onclick=()=>{if(launchCloak())b.remove();};document.body.appendChild(b);
+}
+el('cloak').checked=localStorage.getItem(CLOAK_KEY)==='on';
 el('apply').addEventListener('click',()=>{
  const theme=el('theme').value;setTheme(theme);localStorage.setItem('nexus-theme',theme);
  window.nexusMotionEnabled=el('motion').checked;localStorage.setItem('nexus-motion',window.nexusMotionEnabled?'on':'off');
- if(el('cloak').checked){
-  const tab=window.open('about:blank','_blank');
-  if(tab){
-   tab.document.title='Super Math Learning!';
-   const iframe=tab.document.createElement('iframe');iframe.src=location.href;
-   Object.assign(iframe.style,{position:'fixed',inset:'0',width:'100%',height:'100%',border:'0'});
-   tab.document.body.style.margin='0';tab.document.body.appendChild(iframe);
-   // The original tab becomes Clever. Cross-origin load completion cannot be guaranteed.
-   location.assign('https://clever.com/');
-  }
-  el('cloak').checked=false;
- }
+ const enabled=el('cloak').checked;
+ localStorage.setItem(CLOAK_KEY,enabled?'on':'off');
+ if(enabled){if(!launchCloak())offerCloakLaunch();}
+ else document.getElementById('nexus-cloak-launch')?.remove();
  el('modal').classList.remove('show');
 });
+if(localStorage.getItem(CLOAK_KEY)==='on' && window.top===window.self){
+ // On load, Chrome commonly blocks window.open without a user gesture.
+ // The explicit button is provided instead of claiming automatic launch works.
+ setTimeout(()=>{if(!launchCloak())offerCloakLaunch();},0);
+}
 // Tab closing cannot be intercepted reliably. Explicit exit is dependable.
 el('exit-clever').addEventListener('click',()=>{stopFrame();location.assign('https://clever.com/');});
 // Best-effort warning only; developer tools cannot be securely detected or disabled by a website.
 const warning=el('inspect-warning');let flagged=false;
 function checkInspect(){if(flagged)return;const threshold=180;if((window.outerWidth-window.innerWidth>threshold)||(window.outerHeight-window.innerHeight>threshold)){flagged=true;warning.hidden=false;stopFrame();}}
 setInterval(checkInspect,1500);
+
+// NEXUS games: each launch creates a fresh iframe; exiting destroys it so media and timers stop.
+const gamesView=el('games-view'),gamesLibrary=el('games-library'),gamePlayer=el('game-player'),gameHost=el('game-frame-host');
+function destroyGame(){const f=gameHost.querySelector('iframe');if(f){try{f.src='about:blank';}catch(_){}f.remove();}gameHost.replaceChildren();}
+function leaveGames(){destroyGame();gamesView.hidden=true;gamesLibrary.hidden=false;gamePlayer.hidden=true;document.body.classList.remove('games-active');}
+function showGames(){stopFrame();state.url='';state.history=[];state.index=-1;el('browser-view').hidden=true;el('homepage').hidden=true;document.body.classList.remove('browser-active');document.body.classList.add('games-active');gamesView.hidden=false;gamesLibrary.hidden=false;gamePlayer.hidden=true;el('address').value='';}
+function openGame(){destroyGame();gamesLibrary.hidden=true;gamePlayer.hidden=false;const f=document.createElement('iframe');f.src='/games/star-dodge.html';f.title='Star Dodge';f.setAttribute('allow','fullscreen');gameHost.append(f);}
+el('games-launch').addEventListener('click',showGames);
+el('games-back').addEventListener('click',home);
+el('game-star-dodge').addEventListener('click',openGame);
+el('game-back').addEventListener('click',()=>{destroyGame();gamePlayer.hidden=true;gamesLibrary.hidden=false;});
+el('game-restart').addEventListener('click',openGame);
+// Standalone top-level assistant avoids Document PiP restrictions inside an iframe.
+el('ai-launch').addEventListener('click',()=>{
+ const win=window.open('/learning.html','nexus_learning','popup=yes,width=420,height=650,resizable=yes,scrollbars=yes');
+ if(win)win.focus();else window.location.href='/learning.html';
+});
