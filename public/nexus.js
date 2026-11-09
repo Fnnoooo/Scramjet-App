@@ -127,26 +127,52 @@ const gameCatalog={
  'granny':{name:'Granny Original',url:'https://playhop.com/app/granny-original-259805'},
  'geo':{name:'Fake Geo Dash',url:'https://www.miniplay.com/game/geometry-dash'}
 };
-let selectedGame=null,gameLoadToken=0,activeGameFrame=null;
-let reusableGameProxy=null;
+// Game sessions are isolated by a clean host-page reload on exit/restart.
+// Scramjet's old frame/worker registrations and game WebSockets otherwise
+// survive iframe cleanup and can leave Unity/WebGL games stuck at 99%.
+const GAME_RESTORE_KEY='nexus-v13-next-game';
+let selectedGame=null,gameLoadToken=0,activeGameFrame=null,gameKeepalive=null;
+function pingGameWorker(){
+ try{navigator.serviceWorker?.controller?.postMessage('nexus-game-keepalive');}catch(_){}
+}
+function startGameKeepalive(){
+ if(gameKeepalive)return;
+ pingGameWorker();
+ gameKeepalive=setInterval(pingGameWorker,15000);
+}
 function destroyGame(){
  gameLoadToken++;
- // Keep the Scramjet frame registered and reuse it. Removing the DOM node alone
- // does not unregister its routing prefix from the controller/service worker.
- if(reusableGameProxy){
-  try{reusableGameProxy.frame.src='about:blank';}catch(e){console.warn('[NEXUS game cleanup]',e);}
-  reusableGameProxy.frame.hidden=true;
-  reusableGameProxy.frame.style.display='none';
+ if(gameKeepalive){clearInterval(gameKeepalive);gameKeepalive=null;}
+ if(activeGameFrame){
+  try{activeGameFrame.frame.src='about:blank';activeGameFrame.frame.remove();}catch(_){}
+  activeGameFrame=null;
  }
- activeGameFrame=null;
  gameHost.querySelectorAll('iframe').forEach(f=>{
-  if(reusableGameProxy&&f===reusableGameProxy.frame)return;
-  try{f.src='about:blank';}catch(_){}f.remove();
+  try{f.src='about:blank';f.remove();}catch(_){}
  });
  gameHost.querySelectorAll('.game-connect-status').forEach(n=>n.remove());
 }
-function leaveGames(){destroyGame();gamesView.hidden=true;gamesLibrary.hidden=false;gamePlayer.hidden=true;document.body.classList.remove('games-active');}
-function showGames(){stopFrame();state.url='';state.history=[];state.index=-1;el('browser-view').hidden=true;el('homepage').hidden=true;document.body.classList.remove('browser-active');document.body.classList.add('games-active');gamesView.hidden=false;gamesLibrary.hidden=false;gamePlayer.hidden=true;el('address').value='';}
+function leaveGames(){
+ destroyGame();
+ gamesView.hidden=true;gamesLibrary.hidden=false;gamePlayer.hidden=true;
+ document.body.classList.remove('games-active');
+}
+function showGames(){
+ stopFrame();state.url='';state.history=[];state.index=-1;
+ el('browser-view').hidden=true;el('homepage').hidden=true;
+ document.body.classList.remove('browser-active');
+ document.body.classList.add('games-active');
+ gamesView.hidden=false;gamesLibrary.hidden=false;gamePlayer.hidden=true;
+ el('address').value='';
+}
+function freshGameSession(next){
+ // A full shell reload actually closes the Scramjet controller, transport,
+ // outstanding requests and game WebGL contexts. No site data is erased.
+ try{sessionStorage.setItem(GAME_RESTORE_KEY,JSON.stringify(next));}
+ catch(e){console.warn('[NEXUS game restore]',e);}
+ destroyGame();
+ location.reload();
+}
 async function openGame(id){
  const game=gameCatalog[id];if(!game)return;
  selectedGame=id;destroyGame();const token=gameLoadToken;
@@ -156,43 +182,56 @@ async function openGame(id){
  const search=el('game-search');if(search)search.href='https://www.google.com/search?q='+encodeURIComponent(game.name+' play online');
  const hint=el('game-hint');
  hint.textContent='Connecting to '+game.name+'…';
- const message=document.createElement('div');message.className='game-connect-status';message.textContent='Starting game…';gameHost.append(message);
+ const message=document.createElement('div');message.className='game-connect-status';
+ message.textContent='Starting game…';gameHost.append(message);
  try{
   if(game.direct){
-   const f=document.createElement('iframe');f.title=game.name;f.loading='eager';f.setAttribute('allow','fullscreen; autoplay; gamepad');f.allowFullscreen=true;
+   const f=document.createElement('iframe');f.title=game.name;f.loading='eager';
+   f.setAttribute('allow','fullscreen; autoplay; gamepad');f.allowFullscreen=true;
    f.src=game.url;gameHost.append(f);message.remove();hint.textContent='Local game loaded.';return;
   }
   await ensureProxy();if(token!==gameLoadToken)return;
-  // Exactly one proxy game frame per page lifetime. No accumulating routing
-  // prefixes or abandoned WebSocket/worker registrations on repeat visits.
-  if(!reusableGameProxy){
-   reusableGameProxy=state.controller.createFrame();
-   const iframe=reusableGameProxy.frame;
-   iframe.id='nexus-game-proxy';
-   iframe.setAttribute('allow','fullscreen; autoplay; gamepad');iframe.allowFullscreen=true;
-  }
-  const proxyFrame=reusableGameProxy;
+  // One fresh frame per host-page lifetime. The host reload on exit is
+  // intentional: reusing a previously navigated WebGL iframe was insufficient.
+  const proxyFrame=state.controller.createFrame();
   activeGameFrame=proxyFrame;
   const f=proxyFrame.frame;
-  f.title=game.name;f.hidden=false;f.style.display='';
-  gameHost.append(f);message.textContent='Connecting through NEXUS proxy…';
+  f.id='nexus-game-proxy';f.title=game.name;
+  f.setAttribute('allow','fullscreen; autoplay; gamepad');f.allowFullscreen=true;
+  gameHost.append(f);startGameKeepalive();
+  message.textContent='Connecting through NEXUS proxy…';
   await proxyFrame.go(game.url);
   if(token!==gameLoadToken)return;
-  message.remove();hint.textContent='Game connected. If a game stalls, use Restart or Open game directly.';
+  message.remove();
+  hint.textContent='Game connected. If the game stalls, try Restart for a clean session.';
  }catch(e){
   if(token!==gameLoadToken)return;
   console.error('[NEXUS game]',game.name,e);
-  if(reusableGameProxy){try{reusableGameProxy.frame.src='about:blank';reusableGameProxy.frame.hidden=true;reusableGameProxy.frame.style.display='none';}catch(_){} }
-  activeGameFrame=null;
+  destroyGame();
   message.textContent='This game could not connect through the proxy. Try Restart, Open game directly, or Find another version below.';
-  hint.textContent='Some games block proxies, require cookies or WebGL, or refuse embedded connections.';
+  hint.textContent='Some games require cookies, WebGL, or connections the proxy cannot provide.';
  }
 }
+// Restore just the intended view after an intentional game cleanup reload.
+// This is tab-scoped and consumed immediately; a normal fresh visit still
+// shows the calculator until its normal unlock code is entered.
+(function restoreGameView(){
+ let next=null;
+ try{
+  const value=sessionStorage.getItem(GAME_RESTORE_KEY);
+  if(value){sessionStorage.removeItem(GAME_RESTORE_KEY);next=JSON.parse(value);}
+ }catch(_){}
+ if(!next)return;
+ el('calculator-gate').hidden=true;
+ if(next.view==='game'&&gameCatalog[next.id]){
+  showGames();openGame(next.id);
+ }else if(next.view==='games'){showGames();}
+})();
 el('games-launch').addEventListener('click',showGames);
-el('games-back').addEventListener('click',home);
+el('games-back').addEventListener('click',()=>{if(selectedGame)freshGameSession({view:'home'});else home();});
 document.querySelectorAll('[data-game]').forEach(b=>b.addEventListener('click',()=>openGame(b.dataset.game)));
-el('game-back').addEventListener('click',()=>{destroyGame();gamePlayer.hidden=true;gamesLibrary.hidden=false;});
-el('game-restart').addEventListener('click',()=>selectedGame&&openGame(selectedGame));
+el('game-back').addEventListener('click',()=>freshGameSession({view:'games'}));
+el('game-restart').addEventListener('click',()=>selectedGame&&freshGameSession({view:'game',id:selectedGame}));
 // Standalone top-level assistant avoids Document PiP restrictions inside an iframe.
 el('ai-launch').addEventListener('click',()=>{
  const win=window.open('/learning.html','nexus_learning','popup=yes,width=420,height=650,resizable=yes,scrollbars=yes');
