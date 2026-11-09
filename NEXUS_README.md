@@ -1,0 +1,1 @@
+NEXUS HUB Scramjet UI integration. Deploy this repository as before on Render. npm install / npm start. Original proxy backend and dependencies are unchanged. The browser uses Scramjet for site navigation; site compatibility varies. The original index.js remains as an unused reference. Back/forward controls are best-effort due to iframe restrictions.
