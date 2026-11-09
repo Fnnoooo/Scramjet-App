@@ -127,18 +127,44 @@ const gameCatalog={
  'granny':{name:'Granny Original',url:'https://playhop.com/app/granny-original-259805'},
  'geo':{name:'Fake Geo Dash',url:'https://www.miniplay.com/game/geometry-dash'}
 };
-let selectedGame=null,gameLoadToken=0;
-function destroyGame(){gameLoadToken++;const f=gameHost.querySelector('iframe');if(f){try{f.src='about:blank';}catch(_){}f.remove();}gameHost.replaceChildren();}
+let selectedGame=null,gameLoadToken=0,activeGameFrame=null;
+function destroyGame(){
+ gameLoadToken++;
+ if(activeGameFrame){try{activeGameFrame.frame.src='about:blank';activeGameFrame.frame.remove();}catch(_){}activeGameFrame=null;}
+ gameHost.querySelectorAll('iframe').forEach(f=>{try{f.src='about:blank';}catch(_){}f.remove();});
+ gameHost.replaceChildren();
+}
 function leaveGames(){destroyGame();gamesView.hidden=true;gamesLibrary.hidden=false;gamePlayer.hidden=true;document.body.classList.remove('games-active');}
 function showGames(){stopFrame();state.url='';state.history=[];state.index=-1;el('browser-view').hidden=true;el('homepage').hidden=true;document.body.classList.remove('browser-active');document.body.classList.add('games-active');gamesView.hidden=false;gamesLibrary.hidden=false;gamePlayer.hidden=true;el('address').value='';}
-function openGame(id){
+async function openGame(id){
  const game=gameCatalog[id];if(!game)return;
- selectedGame=id;destroyGame();gamesLibrary.hidden=true;gamePlayer.hidden=false;
+ selectedGame=id;destroyGame();const token=gameLoadToken;
+ gamesLibrary.hidden=true;gamePlayer.hidden=false;
  el('game-current-title').textContent=game.name;
- const f=document.createElement('iframe');f.title=game.name;f.loading='eager';f.referrerPolicy='strict-origin-when-cross-origin';f.setAttribute('allow','fullscreen; autoplay; gamepad');f.allowFullscreen=true;
- f.src=game.url;gameHost.append(f);
  el('game-external').href=game.url;
- el('game-hint').textContent='If the game refuses to embed, use Open game directly. Some websites block third-party frames.';
+ const search=el('game-search');if(search)search.href='https://www.google.com/search?q='+encodeURIComponent(game.name+' play online');
+ const hint=el('game-hint');
+ hint.textContent='Connecting to '+game.name+'…';
+ const message=document.createElement('div');message.className='game-connect-status';message.textContent='Starting game…';gameHost.append(message);
+ try{
+  if(game.direct){
+   const f=document.createElement('iframe');f.title=game.name;f.loading='eager';f.setAttribute('allow','fullscreen; autoplay; gamepad');f.allowFullscreen=true;
+   f.src=game.url;gameHost.append(f);message.remove();hint.textContent='Local game loaded.';return;
+  }
+  // Third-party games must use the same Scramjet proxy as other browser shortcuts.
+  await ensureProxy();if(token!==gameLoadToken)return;
+  const proxyFrame=state.controller.createFrame();activeGameFrame=proxyFrame;
+  const f=proxyFrame.frame;f.title=game.name;f.id='nexus-game-proxy';f.setAttribute('allow','fullscreen; autoplay; gamepad');f.allowFullscreen=true;
+  gameHost.append(f);message.textContent='Connecting through NEXUS proxy…';
+  await proxyFrame.go(game.url);if(token!==gameLoadToken)return;
+  message.remove();hint.textContent='Loaded through NEXUS proxy. If the game stays blank, try Open game directly or Find another version.';
+ }catch(e){
+  if(token!==gameLoadToken)return;
+  console.error('[NEXUS game]',game.name,e);
+  if(activeGameFrame){try{activeGameFrame.frame.remove();}catch(_){}activeGameFrame=null;}
+  message.textContent='This game could not connect through the proxy. Try Open game directly or Find another version below.';
+  hint.textContent='Some games block proxies, require cookies or WebGL, or refuse embedded connections.';
+ }
 }
 el('games-launch').addEventListener('click',showGames);
 el('games-back').addEventListener('click',home);
