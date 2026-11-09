@@ -232,8 +232,44 @@ el('games-back').addEventListener('click',()=>{if(selectedGame)freshGameSession(
 document.querySelectorAll('[data-game]').forEach(b=>b.addEventListener('click',()=>openGame(b.dataset.game)));
 el('game-back').addEventListener('click',()=>freshGameSession({view:'games'}));
 el('game-restart').addEventListener('click',()=>selectedGame&&freshGameSession({view:'game',id:selectedGame}));
-// Standalone top-level assistant avoids Document PiP restrictions inside an iframe.
-el('ai-launch').addEventListener('click',()=>{
- const win=window.open('/learning.html','nexus_learning','popup=yes,width=420,height=650,resizable=yes,scrollbars=yes');
- if(win)win.focus();else window.location.href='/learning.html';
-});
+// A single in-page Learning panel: no separate browser window or focus races.
+// Load the existing Learning document on demand and keep it mounted when hidden.
+let learningPanel=null;
+function showLearningPanel(){
+ if(!learningPanel){
+  const panel=document.createElement('section');
+  panel.id='nexus-learning-panel';
+  panel.setAttribute('aria-label','Learning assistant');
+  panel.style.cssText='position:fixed;right:16px;top:16px;width:min(420px,calc(100vw - 24px));height:min(680px,calc(100dvh - 24px));z-index:2147483647;background:#111827;border:1px solid #475569;border-radius:15px;box-shadow:0 20px 75px #000a;overflow:hidden;display:flex;flex-direction:column;';
+  const bar=document.createElement('div');
+  bar.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;background:#172033;color:white;font:600 13px system-ui;cursor:move;touch-action:none;user-select:none;';
+  const label=document.createElement('span');label.textContent='Learning';
+  const controls=document.createElement('div');controls.style.cssText='display:flex;gap:8px;';
+  const minimize=document.createElement('button');minimize.textContent='−';minimize.title='Hide Learning';
+  const close=document.createElement('button');close.textContent='×';close.title='Close Learning';
+  for(const b of [minimize,close])b.style.cssText='background:#334155;color:white;border:0;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:18px;';
+  minimize.onclick=()=>{panel.style.display='none';};
+  close.onclick=()=>{panel.remove();learningPanel=null;};
+  controls.append(minimize,close);bar.append(label,controls);
+  const frame=document.createElement('iframe');frame.src='/learning.html';frame.title='Learning assistant';
+  frame.allow='display-capture; clipboard-read; clipboard-write';
+  frame.style.cssText='width:100%;height:100%;flex:1;border:0;background:#0b1220;';
+  panel.append(bar,frame);document.body.append(panel);learningPanel=panel;
+  let drag=null;
+  bar.addEventListener('pointerdown',e=>{
+   if(e.target.closest('button'))return;
+   const r=panel.getBoundingClientRect();drag={x:e.clientX-r.left,y:e.clientY-r.top};
+   bar.setPointerCapture(e.pointerId);
+  });
+  bar.addEventListener('pointermove',e=>{
+   if(!drag)return;
+   panel.style.left=Math.max(0,Math.min(innerWidth-panel.offsetWidth,e.clientX-drag.x))+'px';
+   panel.style.top=Math.max(0,Math.min(innerHeight-panel.offsetHeight,e.clientY-drag.y))+'px';
+   panel.style.right='auto';
+  });
+  bar.addEventListener('pointerup',()=>drag=null);
+  bar.addEventListener('pointercancel',()=>drag=null);
+ }
+ learningPanel.style.display='flex';
+}
+el('ai-launch').addEventListener('click',showLearningPanel);
