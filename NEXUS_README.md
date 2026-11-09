@@ -1,1 +1,3 @@
 NEXUS HUB Scramjet UI integration. Deploy this repository as before on Render. npm install / npm start. Original proxy backend and dependencies are unchanged. The browser uses Scramjet for site navigation; site compatibility varies. The original index.js remains as an unused reference. Back/forward controls are best-effort due to iframe restrictions.
+
+V5: Movies shortcut updated to https://movisu.app/details.html?movie=969681. Added Halloween pumpkin/lantern decorations and Christmas string lights, trees, and falling snow. Select theme in Settings and press Apply. Embedded movie playback depends on the remote site and proxy SSL compatibility.
