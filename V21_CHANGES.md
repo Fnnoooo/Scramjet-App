@@ -1,0 +1,1 @@
+V21: Removed intro assets and unlocked instantly at 0002. Added game connection watchdog, retry and direct fallback. Developer Tools warning is visual only; website source cannot be hidden from browser inspection.\n
