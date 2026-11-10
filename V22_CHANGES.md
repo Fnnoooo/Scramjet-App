@@ -1,0 +1,1 @@
+V22: Scramjet service worker readiness, unconditional transport setup per page, corrected game watchdog, fixed game error state, full proxy reload on Retry. Does not guarantee compatibility with remote WebGL/WebSocket game hosts.

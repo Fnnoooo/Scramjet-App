@@ -39,19 +39,37 @@ function stopFrame(){
 }
 function home(){leaveGames();stopFrame();state.url='';state.history=[];state.index=-1;document.body.classList.remove('browser-active');el('browser-view').hidden=true;el('homepage').hidden=false;el('address').value='';status('');}
 function showBrowser(){el('browser-view').hidden=false;el('homepage').hidden=true;document.body.classList.add('browser-active');}
+let proxyInitPromise=null;
 async function ensureProxy(){
- if(state.ready)return;
- if(typeof $scramjetLoadController!=='function')throw Error('Proxy script unavailable.');
- if(typeof BareMux==='undefined')throw Error('Transport script unavailable.');
- if(typeof registerSW!=='function')throw Error('Service worker unavailable.');
- const {ScramjetController}=$scramjetLoadController();
- state.controller=new ScramjetController({files:{wasm:'/scram/scramjet.wasm.wasm',all:'/scram/scramjet.all.js',sync:'/scram/scramjet.sync.js'}});
- await state.controller.init();await registerSW();
- state.connection=new BareMux.BareMuxConnection('/baremux/worker.js');
- const wisp=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/wisp/';
- if((await state.connection.getTransport())!=='/libcurl/index.mjs')await state.connection.setTransport('/libcurl/index.mjs',[{websocket:wisp}]);
- state.ready=true;
+ if(state.ready && state.controller && state.connection)return;
+ if(proxyInitPromise)return proxyInitPromise;
+ proxyInitPromise=(async()=>{
+  if(typeof $scramjetLoadController!=='function')throw Error('Scramjet bundle unavailable');
+  if(typeof BareMux==='undefined')throw Error('BareMux bundle unavailable');
+  if(typeof registerSW!=='function')throw Error('Service worker registration unavailable');
+  // Register first, then wait for this page to be controlled. On first install,
+  // the worker must claim the client before proxy requests are issued.
+  await registerSW();
+  if(!navigator.serviceWorker.controller){
+   await Promise.race([
+    new Promise(resolve=>navigator.serviceWorker.addEventListener('controllerchange',resolve,{once:true})),
+    new Promise((_,reject)=>setTimeout(()=>reject(Error('Service worker did not take control; refresh the page')),12000))
+   ]);
+  }
+  const {ScramjetController}=$scramjetLoadController();
+  const controller=new ScramjetController({files:{wasm:'/scram/scramjet.wasm.wasm',all:'/scram/scramjet.all.js',sync:'/scram/scramjet.sync.js'}});
+  await controller.init();
+  const connection=new BareMux.BareMuxConnection('/baremux/worker.js');
+  const wisp=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/wisp/';
+  // Set transport on every fresh page lifetime. A previous worker can retain
+  // an old or disconnected transport even when getTransport() matches.
+  await connection.setTransport('/libcurl/index.mjs',[{websocket:wisp}]);
+  state.controller=controller;state.connection=connection;state.ready=true;
+ })();
+ try{await proxyInitPromise;}catch(e){state.ready=false;state.controller=null;state.connection=null;throw e;}
+ finally{proxyInitPromise=null;}
 }
+
 function normalize(input){input=(input||'').trim();if(!input)return '';if(/^https?:\/\//i.test(input))return input;if(/^[\w-]+(\.[\w-]+)+([/:?#]|$)/.test(input))return 'https://'+input;return 'https://www.google.com/search?q='+encodeURIComponent(input);}
 async function navigate(input,record=true){
  const url=normalize(input);if(!url||state.loading)return;
@@ -160,6 +178,7 @@ function startGameKeepalive(){
 }
 function destroyGame(){
  gameLoadToken++;
+ if(gameWatchdog){clearTimeout(gameWatchdog);gameWatchdog=null;}
  if(gameKeepalive){clearInterval(gameKeepalive);gameKeepalive=null;}
  if(activeGameFrame){
   try{activeGameFrame.frame.src='about:blank';activeGameFrame.frame.remove();}catch(_){}
@@ -216,23 +235,23 @@ async function openGame(id){
   const f=proxyFrame.frame;
   f.id='nexus-game-proxy';f.title=game.name;
   f.setAttribute('allow','fullscreen; autoplay; gamepad');f.allowFullscreen=true;
-  gameHost.append(f);startGameKeepalive();
+  gameHost.append(f);
   gameWatchdog=setTimeout(()=>{
    if(token!==gameLoadToken)return;
-   message.textContent='Still loading? The game may be blocked by a proxy asset or WebSocket connection.';
-   hint.textContent='Try Retry Connection or Open game directly. A stalled in-game 99% counter cannot be repaired by the parent page.';
    message.hidden=false;
-  },18000);
+   message.textContent='Game is taking longer than expected. This can happen if game assets or WebSockets are blocked.';
+   hint.textContent='Retry Connection creates a new game frame; Restart Session reloads the proxy connection.';
+  },25000);
   message.textContent='Connecting through NEXUS proxy…';
   await proxyFrame.go(game.url);
   if(token!==gameLoadToken)return;
-  message.remove();
-  hint.textContent='If the game stops at 99%, try Retry Connection or Open game directly.';
-  setTimeout(()=>{if(token===gameLoadToken)message.hidden=true;},2500);
+  message.hidden=true;
+  hint.textContent='Game opened through Scramjet. If it stalls at 99%, try Restart Session or the direct game link.';
  }catch(e){
   if(token!==gameLoadToken)return;
   console.error('[NEXUS game]',game.name,e);
   destroyGame();
+  gameHost.append(message);message.hidden=false;
   message.textContent='This game could not connect through the proxy. Try Restart, Open game directly, or Find another version below.';
   hint.textContent='Some games require cookies, WebGL, or connections the proxy cannot provide.';
  }
@@ -256,7 +275,7 @@ el('games-launch').addEventListener('click',showGames);
 el('games-back').addEventListener('click',()=>{if(selectedGame)freshGameSession({view:'home'});else home();});
 document.querySelectorAll('[data-game]').forEach(b=>b.addEventListener('click',()=>openGame(b.dataset.game)));
 el('game-back').addEventListener('click',()=>freshGameSession({view:'games'}));
-el('game-retry').addEventListener('click',()=>selectedGame&&openGame(selectedGame));
+el('game-retry').addEventListener('click',()=>selectedGame&&freshGameSession({view:'game',id:selectedGame}));
 el('game-restart').addEventListener('click',()=>selectedGame&&freshGameSession({view:'game',id:selectedGame}));
 // Document PiP is opened directly from the main NEXUS tab. No popup host.
 // The calculator and assistant live in ONE PiP iframe, so the user can switch
