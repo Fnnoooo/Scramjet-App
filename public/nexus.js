@@ -9,7 +9,7 @@
  function press(k){
   if(/^\d$/.test(k)){
    entry+=k;entry=entry.slice(-20);
-   if(entry.endsWith('0002')){entry='';if(typeof window.nexusCinematicUnlock==='function'){window.nexusCinematicUnlock();}else{gate.hidden=true;}return;}
+   if(entry.endsWith('0002')){gate.hidden=true;entry='';return;}
    raw=(fresh||raw==='0')?k:raw+k;fresh=false;raw=raw.slice(-18);
   } else if(k==='C'){raw='0';lhs=null;op=null;fresh=false;entry='';}
   else if(k==='⌫'){raw=raw.length>1?raw.slice(0,-1):'0';entry=entry.slice(0,-1);}
@@ -204,7 +204,7 @@ async function openGame(id){
   await proxyFrame.go(game.url);
   if(token!==gameLoadToken)return;
   message.remove();
-  hint.textContent='Connected. If loading stops at 99%, click Restart to create a new game session.';
+  hint.textContent='Game connected. If the game stalls, try Restart for a clean session.';
  }catch(e){
   if(token!==gameLoadToken)return;
   console.error('[NEXUS game]',game.name,e);
