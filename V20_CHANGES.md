@@ -1,0 +1,1 @@
+V20: Reverted game code to V16 baseline after V19 first-load regression. Restored cinematic intro hookup and removed 350ms reduced-motion auto-close. Animation stays for 7.05s. Note: external games can still hang at 99% due to upstream/proxy WebSocket or assets.
