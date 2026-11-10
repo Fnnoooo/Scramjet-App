@@ -1,0 +1,1 @@
+V24: Fixed Go Back / Restart forcibly reloading the entire host website. Game iframe cleanup is local, and old sessionStorage restore markers are cleared. This prevents an avoidable site reload but cannot guarantee compatibility with external games or managed Chromebook policies.

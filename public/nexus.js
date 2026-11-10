@@ -61,8 +61,7 @@ async function ensureProxy(){
   await controller.init();
   const connection=new BareMux.BareMuxConnection('/baremux/worker.js');
   const wisp=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/wisp/';
-  // Set transport on every fresh page lifetime. A previous worker can retain
-  // an old or disconnected transport even when getTransport() matches.
+  // Initialize transport once per page lifetime; do not reset it on back navigation.
   await connection.setTransport('/libcurl/index.mjs',[{websocket:wisp}]);
   state.controller=controller;state.connection=connection;state.ready=true;
  })();
@@ -203,12 +202,13 @@ function showGames(){
  el('address').value='';
 }
 function freshGameSession(next){
- // A full shell reload actually closes the Scramjet controller, transport,
- // outstanding requests and game WebGL contexts. No site data is erased.
- try{sessionStorage.setItem(GAME_RESTORE_KEY,JSON.stringify(next));}
- catch(e){console.warn('[NEXUS game restore]',e);}
+ // Never reload the NEXUS host when leaving a game: a full reload can
+ // reinitialize the service worker and disrupt the whole site on ChromeOS.
  destroyGame();
- location.reload();
+ selectedGame=null;
+ if(next.view==='home')home();
+ else if(next.view==='games')showGames();
+ else if(next.view==='game'&&gameCatalog[next.id]){showGames();openGame(next.id);}
 }
 async function openGame(id){
  const game=gameCatalog[id];if(!game)return;
@@ -228,8 +228,7 @@ async function openGame(id){
    f.src=game.url;gameHost.append(f);message.remove();hint.textContent='Local game loaded.';return;
   }
   await ensureProxy();if(token!==gameLoadToken)return;
-  // One fresh frame per host-page lifetime. The host reload on exit is
-  // intentional: reusing a previously navigated WebGL iframe was insufficient.
+  // Create a new game frame without reloading the NEXUS shell.
   const proxyFrame=state.controller.createFrame();
   activeGameFrame=proxyFrame;
   const f=proxyFrame.frame;
@@ -256,27 +255,14 @@ async function openGame(id){
   hint.textContent='Some games require cookies, WebGL, or connections the proxy cannot provide.';
  }
 }
-// Restore just the intended view after an intentional game cleanup reload.
-// This is tab-scoped and consumed immediately; a normal fresh visit still
-// shows the calculator until its normal unlock code is entered.
-(function restoreGameView(){
- let next=null;
- try{
-  const value=sessionStorage.getItem(GAME_RESTORE_KEY);
-  if(value){sessionStorage.removeItem(GAME_RESTORE_KEY);next=JSON.parse(value);}
- }catch(_){}
- if(!next)return;
- el('calculator-gate').hidden=true;
- if(next.view==='game'&&gameCatalog[next.id]){
-  showGames();openGame(next.id);
- }else if(next.view==='games'){showGames();}
-})();
+// Clear any stale restore marker left by older releases without reloading.
+try{sessionStorage.removeItem(GAME_RESTORE_KEY);}catch(_){}
 el('games-launch').addEventListener('click',showGames);
 el('games-back').addEventListener('click',()=>{if(selectedGame)freshGameSession({view:'home'});else home();});
 document.querySelectorAll('[data-game]').forEach(b=>b.addEventListener('click',()=>openGame(b.dataset.game)));
 el('game-back').addEventListener('click',()=>freshGameSession({view:'games'}));
-el('game-retry').addEventListener('click',()=>selectedGame&&freshGameSession({view:'game',id:selectedGame}));
-el('game-restart').addEventListener('click',()=>selectedGame&&freshGameSession({view:'game',id:selectedGame}));
+el('game-retry').addEventListener('click',()=>selectedGame&&openGame(selectedGame));
+el('game-restart').addEventListener('click',()=>selectedGame&&openGame(selectedGame));
 // Document PiP is opened directly from the main NEXUS tab. No popup host.
 // The calculator and assistant live in ONE PiP iframe, so the user can switch
 // to a captured tab while the floating assistant remains visible.
