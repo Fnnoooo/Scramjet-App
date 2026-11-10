@@ -9,7 +9,7 @@
  function press(k){
   if(/^\d$/.test(k)){
    entry+=k;entry=entry.slice(-20);
-   if(entry.endsWith('0002')){entry='';window.nexusCinematicUnlock?.();return;}
+   if(entry.endsWith('0002')){entry='';if(typeof window.nexusCinematicUnlock==='function'){window.nexusCinematicUnlock();}else{const scene=document.getElementById('nexus-intro');if(scene){gate.hidden=true;scene.hidden=false;scene.classList.add('scene-running');setTimeout(()=>{scene.hidden=true;scene.classList.remove('scene-running');},7100);}else{gate.hidden=true;}}return;}
    raw=(fresh||raw==='0')?k:raw+k;fresh=false;raw=raw.slice(-18);
   } else if(k==='C'){raw='0';lhs=null;op=null;fresh=false;entry='';}
   else if(k==='⌫'){raw=raw.length>1?raw.slice(0,-1):'0';entry=entry.slice(0,-1);}
@@ -132,7 +132,7 @@ const gameCatalog={
 // Scramjet's old frame/worker registrations and game WebSockets otherwise
 // survive iframe cleanup and can leave Unity/WebGL games stuck at 99%.
 const GAME_RESTORE_KEY='nexus-v13-next-game';
-let selectedGame=null,gameLoadToken=0,activeGameFrame=null,gameKeepalive=null;
+let selectedGame=null,gameLoadToken=0,activeGameFrame=null,gameKeepalive=null,gameWatchdog=null;
 function pingGameWorker(){
  try{navigator.serviceWorker?.controller?.postMessage('nexus-game-keepalive');}catch(_){}
 }
@@ -143,6 +143,7 @@ function startGameKeepalive(){
 }
 function destroyGame(){
  gameLoadToken++;
+ if(gameWatchdog){clearTimeout(gameWatchdog);gameWatchdog=null;}
  if(gameKeepalive){clearInterval(gameKeepalive);gameKeepalive=null;}
  if(activeGameFrame){
   try{activeGameFrame.frame.src='about:blank';activeGameFrame.frame.remove();}catch(_){}
@@ -204,7 +205,11 @@ async function openGame(id){
   await proxyFrame.go(game.url);
   if(token!==gameLoadToken)return;
   message.remove();
-  hint.textContent='Game connected. If the game stalls, try Restart for a clean session.';
+  hint.textContent='Game connected. If the game freezes at 99%, use Restart Session.';
+  gameWatchdog=setTimeout(()=>{
+   if(token!==gameLoadToken||gamePlayer.hidden)return;
+   hint.textContent='Still loading? A game asset or WebSocket may be blocked by the proxy. Try Restart Session or Open game directly.';
+  },22000);
  }catch(e){
   if(token!==gameLoadToken)return;
   console.error('[NEXUS game]',game.name,e);

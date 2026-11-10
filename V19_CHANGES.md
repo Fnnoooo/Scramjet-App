@@ -1,0 +1,1 @@
+V19: Hardened intro visibility and cache-busted assets; animated dark shutters, light beam and glowing kinetic NEXUS typography. Added game stall guidance and watchdog; reduced unnecessary background work. Third-party WebGL 99% stalls cannot be guaranteed fixed when proxy requests are blocked.
