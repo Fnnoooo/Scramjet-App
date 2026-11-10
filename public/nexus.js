@@ -9,7 +9,7 @@
  function press(k){
   if(/^\d$/.test(k)){
    entry+=k;entry=entry.slice(-20);
-   if(entry.endsWith('0002')){entry='';gate.hidden=true;return;}
+   if(entry.endsWith('0002')){entry='';if(typeof window.nexusCinematicUnlock==='function'){window.nexusCinematicUnlock();}else{gate.hidden=true;}return;}
    raw=(fresh||raw==='0')?k:raw+k;fresh=false;raw=raw.slice(-18);
   } else if(k==='C'){raw='0';lhs=null;op=null;fresh=false;entry='';}
   else if(k==='⌫'){raw=raw.length>1?raw.slice(0,-1):'0';entry=entry.slice(0,-1);}
@@ -108,28 +108,11 @@ el('open-cloak')?.addEventListener('click',()=>{
 });
 // Tab closing cannot be intercepted reliably. Explicit exit is dependable.
 el('exit-clever').addEventListener('click',()=>{stopFrame();location.assign('https://clever.com/');});
-// Best-effort developer-tools presentation only. Browser source remains inspectable.
-const warning=el('inspect-warning');
-let inspectShown=false, inspectHits=0;
-function showInspectWarning(){
- if(inspectShown)return;
- inspectShown=true;
- warning.hidden=false;
- document.documentElement.classList.add('nexus-inspect-locked');
- stopFrame();destroyGame();
- console.clear();
- console.log('%cSTOP','color:#ff4747;font-size:64px;font-weight:900;text-shadow:0 0 22px #ff4747;');
- console.log('%cYour not supposed to be here, hurry and close up.','color:#ffffff;background:#171717;padding:12px 18px;font-size:19px;font-weight:700;border-left:5px solid #ff4747');
-}
-function checkInspect(){
- if(inspectShown||document.hidden)return;
- // Docked tools change the viewport. This is not a security boundary.
- const dw=Math.max(0,window.outerWidth-window.innerWidth);
- const dh=Math.max(0,window.outerHeight-window.innerHeight);
- if(dw>220||dh>220){if(++inspectHits>=3)showInspectWarning();}
- else inspectHits=0;
-}
-setInterval(checkInspect,1000);
+// Best-effort warning only; developer tools cannot be securely detected or disabled by a website.
+const warning=el('inspect-warning');let flagged=false;
+function checkInspect(){if(flagged)return;const threshold=180;if((window.outerWidth-window.innerWidth>threshold)||(window.outerHeight-window.innerHeight>threshold)){flagged=true;warning.hidden=false;stopFrame();}}
+// Disabled intrusive polling to reduce CPU usage and false positives.
+
 // Game pages are created only when selected, and destroyed immediately on exit.
 const gamesView=el('games-view'),gamesLibrary=el('games-library'),gamePlayer=el('game-player'),gameHost=el('game-frame-host');
 const gameCatalog={
@@ -149,7 +132,7 @@ const gameCatalog={
 // Scramjet's old frame/worker registrations and game WebSockets otherwise
 // survive iframe cleanup and can leave Unity/WebGL games stuck at 99%.
 const GAME_RESTORE_KEY='nexus-v13-next-game';
-let selectedGame=null,gameLoadToken=0,activeGameFrame=null,gameKeepalive=null,gameWatchdog=null;
+let selectedGame=null,gameLoadToken=0,activeGameFrame=null,gameKeepalive=null;
 function pingGameWorker(){
  try{navigator.serviceWorker?.controller?.postMessage('nexus-game-keepalive');}catch(_){}
 }
@@ -217,18 +200,11 @@ async function openGame(id){
   f.id='nexus-game-proxy';f.title=game.name;
   f.setAttribute('allow','fullscreen; autoplay; gamepad');f.allowFullscreen=true;
   gameHost.append(f);startGameKeepalive();
-  gameWatchdog=setTimeout(()=>{
-   if(token!==gameLoadToken)return;
-   message.textContent='Still loading? The game may be blocked by a proxy asset or WebSocket connection.';
-   hint.textContent='Try Retry Connection or Open game directly. A stalled in-game 99% counter cannot be repaired by the parent page.';
-   message.hidden=false;
-  },18000);
   message.textContent='Connecting through NEXUS proxy…';
   await proxyFrame.go(game.url);
   if(token!==gameLoadToken)return;
   message.remove();
-  hint.textContent='If the game stops at 99%, try Retry Connection or Open game directly.';
-  setTimeout(()=>{if(token===gameLoadToken)message.hidden=true;},2500);
+  hint.textContent='Connected. If loading stops at 99%, click Restart to create a new game session.';
  }catch(e){
   if(token!==gameLoadToken)return;
   console.error('[NEXUS game]',game.name,e);
@@ -256,7 +232,6 @@ el('games-launch').addEventListener('click',showGames);
 el('games-back').addEventListener('click',()=>{if(selectedGame)freshGameSession({view:'home'});else home();});
 document.querySelectorAll('[data-game]').forEach(b=>b.addEventListener('click',()=>openGame(b.dataset.game)));
 el('game-back').addEventListener('click',()=>freshGameSession({view:'games'}));
-el('game-retry').addEventListener('click',()=>selectedGame&&openGame(selectedGame));
 el('game-restart').addEventListener('click',()=>selectedGame&&freshGameSession({view:'game',id:selectedGame}));
 // Document PiP is opened directly from the main NEXUS tab. No popup host.
 // The calculator and assistant live in ONE PiP iframe, so the user can switch
