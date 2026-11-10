@@ -14,7 +14,6 @@ const publicPath = fileURLToPath(new URL("../public/", import.meta.url));
 // Wisp Configuration: Refer to the documentation at https://www.npmjs.com/package/@mercuryworkshop/wisp-js
 
 logging.set_level(logging.NONE);
-// Preserve COOP/COEP required by some Scramjet transports.
 Object.assign(wisp.options, {
 	allow_udp_streams: false,
 	hostname_blacklist: [/example\.com/],
@@ -30,16 +29,8 @@ const fastify = Fastify({
 				handler(req, res);
 			})
 			.on("upgrade", (req, socket, head) => {
-				let pathname;
-                try { pathname = new URL(req.url || "/", "http://localhost").pathname; }
-                catch { socket.destroy(); return; }
-                if (pathname === "/wisp/" || pathname === "/wisp") {
-                    socket.on("error", (err) => console.error("Wisp socket error:", err.message));
-                    try { wisp.routeRequest(req, socket, head); }
-                    catch (err) { console.error("Wisp upgrade failed:", err); socket.destroy(); }
-                } else {
-                    socket.destroy();
-                }
+				if (req.url.endsWith("/wisp/")) wisp.routeRequest(req, socket, head);
+				else socket.end();
 			});
 	},
 });
@@ -65,32 +56,6 @@ fastify.register(fastifyStatic, {
 	root: baremuxPath,
 	prefix: "/baremux/",
 	decorateReply: false,
-});
-
-// Read-only diagnostics: fixed destinations only, never a user-provided URL.
-// This checks Render's own outbound HTTPS independently of Scramjet/Wisp.
-fastify.get("/api/nexus-diagnostics", async (request, reply) => {
-    reply.header("Cache-Control", "no-store");
-    const results = {};
-    for (const [name, url] of Object.entries({
-        example: "https://example.com/",
-        wikipedia: "https://www.wikipedia.org/"
-    })) {
-        const start = Date.now();
-        try {
-            const response = await fetch(url, {
-                method: "GET", redirect: "follow",
-                signal: AbortSignal.timeout(8000),
-                headers: { "User-Agent": "NEXUS-Transport-Diagnostic/1.0" }
-            });
-            // Drain/close the body so connections do not accumulate.
-            await response.body?.cancel();
-            results[name] = { ok: response.ok, status: response.status, ms: Date.now() - start };
-        } catch (err) {
-            results[name] = { ok: false, error: String(err?.cause?.code || err?.code || err?.message || err), ms: Date.now() - start };
-        }
-    }
-    return { checks: results, exampleBlockedInWisp: true, timestamp: new Date().toISOString() };
 });
 
 fastify.setNotFoundHandler((res, reply) => {
@@ -126,9 +91,6 @@ let port = parseInt(process.env.PORT || "");
 if (isNaN(port)) port = 8080;
 
 fastify.listen({
-    port,
-    host: "0.0.0.0",
-}).catch((err) => {
-    console.error("Server failed to start:", err);
-    process.exitCode = 1;
+	port: port,
+	host: "0.0.0.0",
 });

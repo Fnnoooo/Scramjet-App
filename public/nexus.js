@@ -9,7 +9,7 @@
  function press(k){
   if(/^\d$/.test(k)){
    entry+=k;entry=entry.slice(-20);
-   if(entry.endsWith('0002')){entry='';gate.hidden=true;return;}
+   if(entry.endsWith('0002')){gate.hidden=true;entry='';return;}
    raw=(fresh||raw==='0')?k:raw+k;fresh=false;raw=raw.slice(-18);
   } else if(k==='C'){raw='0';lhs=null;op=null;fresh=false;entry='';}
   else if(k==='⌫'){raw=raw.length>1?raw.slice(0,-1):'0';entry=entry.slice(0,-1);}
@@ -39,36 +39,19 @@ function stopFrame(){
 }
 function home(){leaveGames();stopFrame();state.url='';state.history=[];state.index=-1;document.body.classList.remove('browser-active');el('browser-view').hidden=true;el('homepage').hidden=false;el('address').value='';status('');}
 function showBrowser(){el('browser-view').hidden=false;el('homepage').hidden=true;document.body.classList.add('browser-active');}
-let proxyInitPromise=null;
 async function ensureProxy(){
- if(state.ready && state.controller && state.connection)return;
- if(proxyInitPromise)return proxyInitPromise;
- proxyInitPromise=(async()=>{
-  if(typeof $scramjetLoadController!=='function')throw Error('Scramjet bundle unavailable');
-  if(typeof BareMux==='undefined')throw Error('BareMux bundle unavailable');
-  if(typeof registerSW!=='function')throw Error('Service worker registration unavailable');
-  // Register first, then wait for this page to be controlled. On first install,
-  // the worker must claim the client before proxy requests are issued.
-  await registerSW();
-  if(!navigator.serviceWorker.controller){
-   await Promise.race([
-    new Promise(resolve=>navigator.serviceWorker.addEventListener('controllerchange',resolve,{once:true})),
-    new Promise((_,reject)=>setTimeout(()=>reject(Error('Service worker did not take control; refresh the page')),12000))
-   ]);
-  }
-  const {ScramjetController}=$scramjetLoadController();
-  const controller=new ScramjetController({files:{wasm:'/scram/scramjet.wasm.wasm',all:'/scram/scramjet.all.js',sync:'/scram/scramjet.sync.js'}});
-  await controller.init();
-  const connection=new BareMux.BareMuxConnection('/baremux/worker.js');
-  const wisp=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/wisp/';
-  // Initialize transport once per page lifetime; do not reset it on back navigation.
-  await connection.setTransport('/libcurl/index.mjs',[{websocket:wisp}]);
-  state.controller=controller;state.connection=connection;state.ready=true;
- })();
- try{await proxyInitPromise;}catch(e){state.ready=false;state.controller=null;state.connection=null;throw e;}
- finally{proxyInitPromise=null;}
+ if(state.ready)return;
+ if(typeof $scramjetLoadController!=='function')throw Error('Proxy script unavailable.');
+ if(typeof BareMux==='undefined')throw Error('Transport script unavailable.');
+ if(typeof registerSW!=='function')throw Error('Service worker unavailable.');
+ const {ScramjetController}=$scramjetLoadController();
+ state.controller=new ScramjetController({files:{wasm:'/scram/scramjet.wasm.wasm',all:'/scram/scramjet.all.js',sync:'/scram/scramjet.sync.js'}});
+ await state.controller.init();await registerSW();
+ state.connection=new BareMux.BareMuxConnection('/baremux/worker.js');
+ const wisp=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/wisp/';
+ if((await state.connection.getTransport())!=='/libcurl/index.mjs')await state.connection.setTransport('/libcurl/index.mjs',[{websocket:wisp}]);
+ state.ready=true;
 }
-
 function normalize(input){input=(input||'').trim();if(!input)return '';if(/^https?:\/\//i.test(input))return input;if(/^[\w-]+(\.[\w-]+)+([/:?#]|$)/.test(input))return 'https://'+input;return 'https://www.google.com/search?q='+encodeURIComponent(input);}
 async function navigate(input,record=true){
  const url=normalize(input);if(!url||state.loading)return;
@@ -125,28 +108,11 @@ el('open-cloak')?.addEventListener('click',()=>{
 });
 // Tab closing cannot be intercepted reliably. Explicit exit is dependable.
 el('exit-clever').addEventListener('click',()=>{stopFrame();location.assign('https://clever.com/');});
-// Best-effort developer-tools presentation only. Browser source remains inspectable.
-const warning=el('inspect-warning');
-let inspectShown=false, inspectHits=0;
-function showInspectWarning(){
- if(inspectShown)return;
- inspectShown=true;
- warning.hidden=false;
- document.documentElement.classList.add('nexus-inspect-locked');
- stopFrame();destroyGame();
- console.clear();
- console.log('%cSTOP','color:#ff4747;font-size:64px;font-weight:900;text-shadow:0 0 22px #ff4747;');
- console.log('%cYour not supposed to be here, hurry and close up.','color:#ffffff;background:#171717;padding:12px 18px;font-size:19px;font-weight:700;border-left:5px solid #ff4747');
-}
-function checkInspect(){
- if(inspectShown||document.hidden)return;
- // Docked tools change the viewport. This is not a security boundary.
- const dw=Math.max(0,window.outerWidth-window.innerWidth);
- const dh=Math.max(0,window.outerHeight-window.innerHeight);
- if(dw>220||dh>220){if(++inspectHits>=3)showInspectWarning();}
- else inspectHits=0;
-}
-setInterval(checkInspect,1000);
+// Best-effort warning only; developer tools cannot be securely detected or disabled by a website.
+const warning=el('inspect-warning');let flagged=false;
+function checkInspect(){if(flagged)return;const threshold=180;if((window.outerWidth-window.innerWidth>threshold)||(window.outerHeight-window.innerHeight>threshold)){flagged=true;warning.hidden=false;stopFrame();}}
+// Disabled intrusive polling to reduce CPU usage and false positives.
+
 // Game pages are created only when selected, and destroyed immediately on exit.
 const gamesView=el('games-view'),gamesLibrary=el('games-library'),gamePlayer=el('game-player'),gameHost=el('game-frame-host');
 const gameCatalog={
@@ -166,7 +132,7 @@ const gameCatalog={
 // Scramjet's old frame/worker registrations and game WebSockets otherwise
 // survive iframe cleanup and can leave Unity/WebGL games stuck at 99%.
 const GAME_RESTORE_KEY='nexus-v13-next-game';
-let selectedGame=null,gameLoadToken=0,activeGameFrame=null,gameKeepalive=null,gameWatchdog=null;
+let selectedGame=null,gameLoadToken=0,activeGameFrame=null,gameKeepalive=null;
 function pingGameWorker(){
  try{navigator.serviceWorker?.controller?.postMessage('nexus-game-keepalive');}catch(_){}
 }
@@ -177,7 +143,6 @@ function startGameKeepalive(){
 }
 function destroyGame(){
  gameLoadToken++;
- if(gameWatchdog){clearTimeout(gameWatchdog);gameWatchdog=null;}
  if(gameKeepalive){clearInterval(gameKeepalive);gameKeepalive=null;}
  if(activeGameFrame){
   try{activeGameFrame.frame.src='about:blank';activeGameFrame.frame.remove();}catch(_){}
@@ -202,13 +167,12 @@ function showGames(){
  el('address').value='';
 }
 function freshGameSession(next){
- // Never reload the NEXUS host when leaving a game: a full reload can
- // reinitialize the service worker and disrupt the whole site on ChromeOS.
+ // A full shell reload actually closes the Scramjet controller, transport,
+ // outstanding requests and game WebGL contexts. No site data is erased.
+ try{sessionStorage.setItem(GAME_RESTORE_KEY,JSON.stringify(next));}
+ catch(e){console.warn('[NEXUS game restore]',e);}
  destroyGame();
- selectedGame=null;
- if(next.view==='home')home();
- else if(next.view==='games')showGames();
- else if(next.view==='game'&&gameCatalog[next.id]){showGames();openGame(next.id);}
+ location.reload();
 }
 async function openGame(id){
  const game=gameCatalog[id];if(!game)return;
@@ -228,41 +192,47 @@ async function openGame(id){
    f.src=game.url;gameHost.append(f);message.remove();hint.textContent='Local game loaded.';return;
   }
   await ensureProxy();if(token!==gameLoadToken)return;
-  // Create a new game frame without reloading the NEXUS shell.
+  // One fresh frame per host-page lifetime. The host reload on exit is
+  // intentional: reusing a previously navigated WebGL iframe was insufficient.
   const proxyFrame=state.controller.createFrame();
   activeGameFrame=proxyFrame;
   const f=proxyFrame.frame;
   f.id='nexus-game-proxy';f.title=game.name;
   f.setAttribute('allow','fullscreen; autoplay; gamepad');f.allowFullscreen=true;
-  gameHost.append(f);
-  gameWatchdog=setTimeout(()=>{
-   if(token!==gameLoadToken)return;
-   message.hidden=false;
-   message.textContent='Game is taking longer than expected. This can happen if game assets or WebSockets are blocked.';
-   hint.textContent='Retry Connection creates a new game frame; Restart Session reloads the proxy connection.';
-  },25000);
+  gameHost.append(f);startGameKeepalive();
   message.textContent='Connecting through NEXUS proxy…';
   await proxyFrame.go(game.url);
   if(token!==gameLoadToken)return;
-  message.hidden=true;
-  hint.textContent='Game opened through Scramjet. If it stalls at 99%, try Restart Session or the direct game link.';
+  message.remove();
+  hint.textContent='Game connected. If the game stalls, try Restart for a clean session.';
  }catch(e){
   if(token!==gameLoadToken)return;
   console.error('[NEXUS game]',game.name,e);
   destroyGame();
-  gameHost.append(message);message.hidden=false;
   message.textContent='This game could not connect through the proxy. Try Restart, Open game directly, or Find another version below.';
   hint.textContent='Some games require cookies, WebGL, or connections the proxy cannot provide.';
  }
 }
-// Clear any stale restore marker left by older releases without reloading.
-try{sessionStorage.removeItem(GAME_RESTORE_KEY);}catch(_){}
+// Restore just the intended view after an intentional game cleanup reload.
+// This is tab-scoped and consumed immediately; a normal fresh visit still
+// shows the calculator until its normal unlock code is entered.
+(function restoreGameView(){
+ let next=null;
+ try{
+  const value=sessionStorage.getItem(GAME_RESTORE_KEY);
+  if(value){sessionStorage.removeItem(GAME_RESTORE_KEY);next=JSON.parse(value);}
+ }catch(_){}
+ if(!next)return;
+ el('calculator-gate').hidden=true;
+ if(next.view==='game'&&gameCatalog[next.id]){
+  showGames();openGame(next.id);
+ }else if(next.view==='games'){showGames();}
+})();
 el('games-launch').addEventListener('click',showGames);
 el('games-back').addEventListener('click',()=>{if(selectedGame)freshGameSession({view:'home'});else home();});
 document.querySelectorAll('[data-game]').forEach(b=>b.addEventListener('click',()=>openGame(b.dataset.game)));
 el('game-back').addEventListener('click',()=>freshGameSession({view:'games'}));
-el('game-retry').addEventListener('click',()=>selectedGame&&openGame(selectedGame));
-el('game-restart').addEventListener('click',()=>selectedGame&&openGame(selectedGame));
+el('game-restart').addEventListener('click',()=>selectedGame&&freshGameSession({view:'game',id:selectedGame}));
 // Document PiP is opened directly from the main NEXUS tab. No popup host.
 // The calculator and assistant live in ONE PiP iframe, so the user can switch
 // to a captured tab while the floating assistant remains visible.
