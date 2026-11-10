@@ -67,6 +67,32 @@ fastify.register(fastifyStatic, {
 	decorateReply: false,
 });
 
+// Read-only diagnostics: fixed destinations only, never a user-provided URL.
+// This checks Render's own outbound HTTPS independently of Scramjet/Wisp.
+fastify.get("/api/nexus-diagnostics", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const results = {};
+    for (const [name, url] of Object.entries({
+        example: "https://example.com/",
+        wikipedia: "https://www.wikipedia.org/"
+    })) {
+        const start = Date.now();
+        try {
+            const response = await fetch(url, {
+                method: "GET", redirect: "follow",
+                signal: AbortSignal.timeout(8000),
+                headers: { "User-Agent": "NEXUS-Transport-Diagnostic/1.0" }
+            });
+            // Drain/close the body so connections do not accumulate.
+            await response.body?.cancel();
+            results[name] = { ok: response.ok, status: response.status, ms: Date.now() - start };
+        } catch (err) {
+            results[name] = { ok: false, error: String(err?.cause?.code || err?.code || err?.message || err), ms: Date.now() - start };
+        }
+    }
+    return { checks: results, exampleBlockedInWisp: true, timestamp: new Date().toISOString() };
+});
+
 fastify.setNotFoundHandler((res, reply) => {
 	return reply.code(404).type("text/html").sendFile("404.html");
 });
