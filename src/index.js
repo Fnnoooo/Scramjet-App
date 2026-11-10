@@ -14,6 +14,7 @@ const publicPath = fileURLToPath(new URL("../public/", import.meta.url));
 // Wisp Configuration: Refer to the documentation at https://www.npmjs.com/package/@mercuryworkshop/wisp-js
 
 logging.set_level(logging.NONE);
+// Preserve COOP/COEP required by some Scramjet transports.
 Object.assign(wisp.options, {
 	allow_udp_streams: false,
 	hostname_blacklist: [/example\.com/],
@@ -29,8 +30,16 @@ const fastify = Fastify({
 				handler(req, res);
 			})
 			.on("upgrade", (req, socket, head) => {
-				if (req.url.endsWith("/wisp/")) wisp.routeRequest(req, socket, head);
-				else socket.end();
+				let pathname;
+                try { pathname = new URL(req.url || "/", "http://localhost").pathname; }
+                catch { socket.destroy(); return; }
+                if (pathname === "/wisp/" || pathname === "/wisp") {
+                    socket.on("error", (err) => console.error("Wisp socket error:", err.message));
+                    try { wisp.routeRequest(req, socket, head); }
+                    catch (err) { console.error("Wisp upgrade failed:", err); socket.destroy(); }
+                } else {
+                    socket.destroy();
+                }
 			});
 	},
 });
@@ -91,6 +100,9 @@ let port = parseInt(process.env.PORT || "");
 if (isNaN(port)) port = 8080;
 
 fastify.listen({
-	port: port,
-	host: "0.0.0.0",
+    port,
+    host: "0.0.0.0",
+}).catch((err) => {
+    console.error("Server failed to start:", err);
+    process.exitCode = 1;
 });
