@@ -9,7 +9,7 @@
  function press(k){
   if(/^\d$/.test(k)){
    entry+=k;entry=entry.slice(-20);
-   if(entry.endsWith('0002')){gate.hidden=true;entry='';return;}
+   if(entry.endsWith('0002')){entry='';window.nexusCinematicUnlock?.();return;}
    raw=(fresh||raw==='0')?k:raw+k;fresh=false;raw=raw.slice(-18);
   } else if(k==='C'){raw='0';lhs=null;op=null;fresh=false;entry='';}
   else if(k==='⌫'){raw=raw.length>1?raw.slice(0,-1):'0';entry=entry.slice(0,-1);}
